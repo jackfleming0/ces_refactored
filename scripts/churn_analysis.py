@@ -5,38 +5,124 @@ import logging
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import NearestNeighbors
+from scipy.stats import ttest_ind
 import statsmodels.api as sm
 
-def analyze_ces_vs_churn(ces_data, churn_data_path):
+
+def analyze_ces_vs_churn(ces_data, churn_data_path, churn_window_days=1000):
     # Load churn data
     churn_data = pd.read_csv(churn_data_path)
 
-    # Convert FE_Site_ID and SiteID in CAA to string for consistent merging
-    ces_data['FE_Site_ID'] = ces_data['FE_Site_ID'].astype(str)
-    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].astype(str)
+    print(f"Original CES data shape: {ces_data.shape}")
+    print(f"Original Churn data shape: {churn_data.shape}")
 
-    # Merge CES data with churn data based on SiteID in CAA and FE_Site_ID
-    merged_data = pd.merge(ces_data, churn_data, left_on='FE_Site_ID', right_on='SiteID in CAA', how='left')
+    # Convert ka and SiteID in CAA to string and ensure consistent formatting
+    ces_data['ka'] = ces_data['ka'].astype(str).str.strip()
+    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].astype(str).str.strip()
 
-    # Create a new column to identify churned vs non-churned clients
-    merged_data['Churned'] = merged_data['SiteID in CAA'].notna()
+    #debug
+    print(churn_data.head().to_dict())
+    print(churn_data['SiteID in CAA'].dtype)
 
-    # Plot CES Response distribution for churned vs non-churned clients
-    plt.figure(figsize=(10, 6))
-    sns.boxplot(x='Churned', y='CES_Response_Value', data=merged_data)
-    plt.title('CES Responses for Churned vs Non-Churned Clients')
-    plt.xlabel('Churned')
-    plt.ylabel('CES Response Value')
-    plt.tight_layout()
-    plt.show()
 
-    # Optional: Perform a statistical test (e.g., t-test) to compare CES scores between churned and non-churned clients
-    churned_ces = merged_data[merged_data['Churned'] == True]['CES_Response_Value']
-    non_churned_ces = merged_data[merged_data['Churned'] == False]['CES_Response_Value']
 
-    from scipy.stats import ttest_ind
-    t_stat, p_value = ttest_ind(churned_ces.dropna(), non_churned_ces.dropna(), equal_var=False)
-    print(f"T-test between churned and non-churned clients: t={t_stat}, p={p_value}")
+    # Ensure Response_Timestamp is in datetime format
+    ces_data['Response_Timestamp'] = pd.to_datetime(ces_data['Response_Timestamp'])
+
+    # Convert Cancellation Scheduled Date to datetime
+    churn_data['Cancellation Scheduled Date'] = pd.to_datetime(churn_data['Cancellation Scheduled Date'])
+
+    # Filter out churn data before February 1, 2024
+    cutoff_date = pd.Timestamp('2024-02-01')
+    churn_data = churn_data[churn_data['Cancellation Scheduled Date'] >= cutoff_date]
+
+    print(f"\nCES data shape after filtering: {ces_data.shape}")
+    print(f"Churn data shape after filtering: {churn_data.shape}")
+
+    print(f"\nUnique ka in CES data: {ces_data['ka'].nunique()}")
+    print(f"Unique SiteIDs in churn data: {churn_data['SiteID in CAA'].nunique()}")
+
+    print(f"\nCES data date range: {ces_data['Response_Timestamp'].min()} to {ces_data['Response_Timestamp'].max()}")
+    print(
+        f"Churn data date range: {churn_data['Cancellation Scheduled Date'].min()} to {churn_data['Cancellation Scheduled Date'].max()}")
+
+    # Merge CES data with churn data based on SiteID in CAA and ka
+    merged_data = pd.merge(ces_data, churn_data, left_on='ka', right_on='SiteID in CAA', how='left')
+
+    print(f"\nMerged data shape: {merged_data.shape}")
+    print(f"Null values in Cancellation Scheduled Date: {merged_data['Cancellation Scheduled Date'].isnull().sum()}")
+
+    # Calculate days to churn
+    merged_data['Days_to_Churn'] = (
+                merged_data['Cancellation Scheduled Date'] - merged_data['Response_Timestamp']).dt.days
+
+    # Count raw matches
+    raw_matches = merged_data['SiteID in CAA'].notna().sum()
+    print(f"\nRaw matches (ignoring dates): {raw_matches}")
+
+    # Categorize matches
+    future_churns = merged_data[(merged_data['SiteID in CAA'].notna()) & (merged_data['Days_to_Churn'] > 0)].shape[0]
+    past_churns = merged_data[(merged_data['SiteID in CAA'].notna()) & (merged_data['Days_to_Churn'] <= 0)].shape[0]
+    no_churn_date = \
+    merged_data[(merged_data['SiteID in CAA'].notna()) & (merged_data['Cancellation Scheduled Date'].isna())].shape[0]
+
+    print(f"\nMatches breakdown:")
+    print(f"Future churns: {future_churns}")
+    print(f"Past churns: {past_churns}")
+    print(f"Matches without churn date: {no_churn_date}")
+
+    # Check for duplicate matches
+    duplicate_matches = merged_data[merged_data.duplicated(['ka', 'SiteID in CAA'], keep=False)]
+    print(f"\nNumber of duplicate matches: {duplicate_matches.shape[0]}")
+    if duplicate_matches.shape[0] > 0:
+        print("\nSample of duplicate matches:")
+        print(duplicate_matches[['ka', 'SiteID in CAA', 'Response_Timestamp', 'Cancellation Scheduled Date']].head())
+
+    # Modified churn detection logic
+    merged_data['Churned'] = merged_data['SiteID in CAA'].notna() & (
+            (merged_data['Cancellation Scheduled Date'].isna()) |  # Include matches without a cancellation date
+            (merged_data['Cancellation Scheduled Date'] >= merged_data['Response_Timestamp'])  # Future churns
+    )
+
+    churned_count = merged_data['Churned'].sum()
+    print(f"\nTotal matches considered as churned: {churned_count}")
+
+    # Print sample of matched data
+    print("\nSample of matched data:")
+    print(merged_data[merged_data['SiteID in CAA'].notna()][
+              ['ka', 'SiteID in CAA', 'Response_Timestamp', 'Cancellation Scheduled Date', 'Days_to_Churn',
+               'Churned']].head(20))
+
+    # Distribution of days to churn for churned clients
+    churned_clients = merged_data[merged_data['Churned'] == True]
+    print("\nDays to Churn statistics for churned clients:")
+    print(churned_clients['Days_to_Churn'].describe())
+
+    # Correlation between CES score and days to churn
+    correlation = churned_clients['CES_Response_Value'].corr(churned_clients['Days_to_Churn'])
+    print(f"\nCorrelation between CES score and Days to Churn: {correlation}")
+
+    # Average CES score for churned vs non-churned clients
+    avg_ces_churned = merged_data[merged_data['Churned'] == True]['CES_Response_Value'].mean()
+    avg_ces_non_churned = merged_data[merged_data['Churned'] == False]['CES_Response_Value'].mean()
+    print(f"\nAverage CES score for churned clients: {avg_ces_churned}")
+    print(f"Average CES score for non-churned clients: {avg_ces_non_churned}")
+
+    # Churn rate for different time windows
+    for window in [30, 90, 180, 365]:
+        churn_rate = (merged_data['Days_to_Churn'].between(0, window)).mean() * 100
+        print(f"Churn rate within {window} days: {churn_rate:.2f}%")
+
+    # Overall churn rate
+    overall_churn_rate = (merged_data['Churned'] == True).mean() * 100
+    print(f"\nOverall churn rate: {overall_churn_rate:.2f}%")
+
+    # Churn rates for different CES score ranges
+    for score_range in [(1, 3), (4, 5), (6, 7)]:
+        rate = merged_data[(merged_data['CES_Response_Value'].between(score_range[0], score_range[1])) &
+                           (merged_data['Churned'] == True)].shape[0] / \
+               merged_data[merged_data['CES_Response_Value'].between(score_range[0], score_range[1])].shape[0] * 100
+        print(f"Churn rate for CES scores {score_range}: {rate:.2f}%")
 
     return merged_data
 
@@ -218,10 +304,35 @@ def visualize_ces_vs_churn(matched_data):
     plt.show()
 
 
-def logistic_regression_ces_on_churn(ces_data, churn_data_path, covariates):
-    # Step 1: Merge CES data with churn data
+def count_ces_scores_from_churned_clients(ces_data, churn_data_path):
+    # Load churn data
     churn_data = pd.read_csv(churn_data_path)
+
+    # Ensure both CES and churn data have the same data type for FE_Site_ID and SiteID in CAA
+    ces_data['FE_Site_ID'] = ces_data['FE_Site_ID'].astype(str)
+    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].astype(str)
+
+    # Merge CES data with churn data to check for churn status
     merged_data = pd.merge(ces_data, churn_data, left_on='FE_Site_ID', right_on='SiteID in CAA', how='left')
+
+    # Count the number of CES responses from clients who churned
+    churned_ces_count = merged_data[merged_data['Churned'] == True].shape[0]
+
+    print(f"Number of CES scores from clients that eventually churned: {churned_ces_count}")
+
+    return churned_ces_count
+
+
+def logistic_regression_ces_on_churn(ces_data, churn_data_path, covariates):
+    # Step 1: Read churn data
+    churn_data = pd.read_csv(churn_data_path)
+
+    # Convert 'FE_Site_ID' to string and handle NaN values
+    ces_data['ka'] = ces_data['ka'].fillna('').astype(str)
+    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].fillna('').astype(str)
+
+    # Step 2: Merge CES data with churn data
+    merged_data = pd.merge(ces_data, churn_data, left_on='ka', right_on='SiteID in CAA', how='left')
 
     # Step 2: Drop rows with missing values (if any)
     merged_data = merged_data.dropna(subset=['CES_Response_Value', 'Churned'] + covariates)

@@ -31,6 +31,10 @@ def main():
     # Feature engineering - creating calculated variables
     ces_data_fe = create_features(ces_data_clean, config['cohorts'])
 
+    #debugging lines
+    print(ces_data.head().to_dict())
+    print(ces_data['FE_Site_ID'].dtype)
+
     # Binning numerical columns - configured in config.yaml
     for column, n_bins in config['columns_to_bin'].items():
         ces_data_fe = bin_numerical_column(ces_data_fe, column, n_bins)
@@ -42,7 +46,11 @@ def main():
 
     # Statistical tests
     t_stat, p_value = t_test_between_groups(ces_data_fe, 'Response_Group', 'CES_Response_Value', 'Group 1', 'Group 2')
+    print(t_stat)
+    print(p_value)
     f_stat, p_value = anova_test(ces_data_fe, 'Response_Group', 'CES_Response_Value')
+    print(f_stat)
+    print(p_value)
     tukey_results = tukey_hsd_test(ces_data_fe, 'Response_Group', 'CES_Response_Value')
 
     # Churn Analysis
