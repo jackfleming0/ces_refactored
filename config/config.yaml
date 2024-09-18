@@ -1,0 +1,70 @@
+data:
+  ces_data_path: '../data/ces_data.csv'
+
+preprocessing:
+  date_columns:
+    - 'Response_Timestamp'
+    - 'Account Start Date'
+  date_formats:
+    - '%Y-%m-%d %H:%M:%S'
+    - '%Y-%m-%d'
+    - '%m/%d/%Y %H:%M:%S'
+
+cohorts:
+  Group 1:
+    start: '2024-02-26'
+    end: '2024-02-28'
+  Group 2:
+    start: '2024-04-10'
+    end: '2024-04-19'
+  Group 3:
+    start: '2024-06-25'
+    end: '2024-07-03'
+  Group 4:
+    start: '2024-08-28'
+    end: '2024-09-10'
+
+columns_to_bin:
+  ClientUser_Cnt: 4
+  Client_#Leads: 4
+  Client_#Logins: 4
+  30DayPageViews: 4
+  Plan_Amt_Dec23: 4
+  leads_per_seat: 4
+
+modeling:
+  feature_columns:
+    - 'account_age'
+    - 'ClientUser_Cnt'
+    - 'leads_per_seat'
+    - 'Client_#Logins'
+    - '30DayPageViews'
+    - 'Plan_Amt_Dec23'
+
+binned_columns:
+  ClientUser_Cnt: 4
+  Client_#Leads: 4
+  Client_#Logins: 4
+  30DayPageViews: 4
+  Plan_Amt_Dec23: 4
+  leads_per_seat: 4
+
+analysis:
+  base_columns:
+    - ClientUser_Type
+  additional_columns:
+    - db_number
+    - ClientSite_Type
+    - Has_Partner
+    - RevaluateStatus
+    - ClientUser_Cnt_binned
+    - Client_#Leads_binned
+    - Client_#Logins_binned
+    - 30DayPageViews_binned
+    - Plan_Amt_Dec23_binned
+    - leads_per_seat_binned
+  time_column: Response_Group
+  ces_column: CES_Response_Value
+  min_responses: 5
+  min_combo: 0
+  max_combo: 1
