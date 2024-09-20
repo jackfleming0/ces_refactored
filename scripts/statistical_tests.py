@@ -2,6 +2,8 @@ import pandas as pd
 import logging
 from scipy import stats
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def t_test_between_groups(df, group_column, target_column, group1, group2):
@@ -14,10 +16,26 @@ def t_test_between_groups(df, group_column, target_column, group1, group2):
     logging.info(f"T-test between {group1} and {group2}: t={t_stat}, p={p_value}")
     return t_stat, p_value
 
+
 def anova_test(df, group_column, target_column):
+    # Perform ANOVA test
     groups = [group[target_column].dropna() for name, group in df.groupby(group_column)]
     f_statistic, p_value = stats.f_oneway(*groups)
     logging.info(f"ANOVA test: F={f_statistic}, p={p_value}")
+
+    # Create box plot
+    plt.figure(figsize=(12, 6))
+    sns.boxplot(x=group_column, y=target_column, data=df)
+
+    # Add ANOVA results as text annotation
+    plt.text(0.05, 0.95, f'F-statistic: {f_statistic:.2f}\np-value: {p_value:.4f}',
+             transform=plt.gca().transAxes, verticalalignment='top',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    plt.title(f'Distribution of {target_column} by {group_column}\nwith ANOVA Results')
+    plt.tight_layout()
+    plt.show()
+
     return f_statistic, p_value
 
 def tukey_hsd_test(df, group_column, target_column):

@@ -20,6 +20,45 @@ def bin_numerical_column(df, column, n_bins=4, labels=None):
     return pd.cut(df[column], bins=n_bins, labels=labels, include_lowest=True)
 
 
+def create_db_cohort(df):
+    """
+    Create a new column 'db_cohort' based on Response_Timestamp and db_number.
+
+    Categories:
+    - refactored_legacy: response before 7/1/2024, db_number in [9, 11, 6, 7, 2]
+    - refactored_current: response on or after 7/1/2024, db_number in [9, 11, 6, 7, 2]
+    - stable_legacy: response before 7/1/2024, db_number not in [9, 11, 6, 7, 2]
+    - stable_current: response on or after 7/1/2024, db_number not in [9, 11, 6, 7, 2]
+
+    Parameters:
+    df (pandas.DataFrame): Input DataFrame containing 'Response_Timestamp' and 'db_number' columns
+
+    Returns:
+    pandas.DataFrame: DataFrame with new 'db_cohort' column
+    """
+    # Convert Response_Timestamp to datetime if it's not already
+    df['Response_Timestamp'] = pd.to_datetime(df['Response_Timestamp'])
+
+    # Define the cutoff date
+    cutoff_date = pd.Timestamp('2024-07-01')
+
+    # Define the refactored db numbers
+    refactored_dbs = [9, 11, 6, 7, 2]
+
+    # Create the db_cohort column
+    conditions = [
+        (df['Response_Timestamp'] < cutoff_date) & (df['db_number'].isin(refactored_dbs)),
+        (df['Response_Timestamp'] >= cutoff_date) & (df['db_number'].isin(refactored_dbs)),
+        (df['Response_Timestamp'] < cutoff_date) & (~df['db_number'].isin(refactored_dbs)),
+        (df['Response_Timestamp'] >= cutoff_date) & (~df['db_number'].isin(refactored_dbs))
+    ]
+    choices = ['refactored_legacy', 'refactored_current', 'stable_legacy', 'stable_current']
+
+    df['db_cohort'] = np.select(conditions, choices, default='unknown')
+
+    return df
+
+
 def create_features(df, cohorts):
     logging.info("Starting feature engineering.")
 
@@ -42,6 +81,8 @@ def create_features(df, cohorts):
 
     # Create Has_Partner
     df['Has_Partner'] = df['Partner1'].fillna('No').apply(lambda x: 'No' if x == 'No' else 'Yes')
+
+    create_db_cohort(df)
 
     logging.info("Feature engineering completed.")
     return df

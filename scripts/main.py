@@ -48,17 +48,51 @@ def main():
     t_stat, p_value = t_test_between_groups(ces_data_fe, 'Response_Group', 'CES_Response_Value', 'Group 1', 'Group 2')
     print(t_stat)
     print(p_value)
+    print ("3.4")
+    t_stat, p_value = t_test_between_groups(ces_data_fe, 'Response_Group', 'CES_Response_Value', 'Group 3', 'Group 4')
+    print(t_stat)
+    print(p_value)
+    t_stat, p_value = t_test_between_groups(ces_data_fe, 'Response_Group', 'CES_Response_Value', 'Group 2', 'Group 4')
+    print(t_stat)
+    print(p_value)
+    t_stat, p_value = t_test_between_groups(ces_data_fe, 'Response_Group', 'CES_Response_Value', 'Group 1', 'Group 4')
+    print(t_stat)
+    print(p_value)
+
     f_stat, p_value = anova_test(ces_data_fe, 'Response_Group', 'CES_Response_Value')
     print(f_stat)
     print(p_value)
+
     tukey_results = tukey_hsd_test(ces_data_fe, 'Response_Group', 'CES_Response_Value')
+    print(tukey_results)
+
+    f_stat, p_value = anova_test(ces_data_fe, 'db_number', 'CES_Response_Value')
+    print(f_stat)
+    print(p_value)
+
+    tukey_results = tukey_hsd_test(ces_data_fe, 'db_number', 'CES_Response_Value')
+    print(tukey_results)
+
+    f_stat, p_value = anova_test(ces_data_fe, 'db_cohort', 'CES_Response_Value')
+    print(f_stat)
+    print(p_value)
+
+    tukey_results = tukey_hsd_test(ces_data_fe, 'db_cohort', 'CES_Response_Value')
+    print(tukey_results)
+
+    f_stat, p_value = anova_test(ces_data_fe, 'ClientUser_Type', 'CES_Response_Value')
+    print(f_stat)
+    print(p_value)
+
+    tukey_results = tukey_hsd_test(ces_data_fe, 'ClientUser_Type', 'CES_Response_Value')
+    print(tukey_results)
 
     # Churn Analysis
     # Step 1: Merge CES data with churn data
     ces_vs_churn_analysis = analyze_ces_vs_churn(ces_data_fe, '../data/churned_clients.csv')
 
     # Step 2: Define covariates for PSM analysis
-    covariates = ['account_age', 'leads_per_seat']
+    covariates = ['account_age', 'leads_per_seat','ClientUser_Cnt','Client_#Leads','Client_#Logins','30DayPageViews','db_number','Plan_Amt_Dec23']
 
     # Step 3: Run Propensity Score Matching using the merged data (ces_vs_churn_analysis)
     matched_data, logit_summary = run_psm_analysis(ces_vs_churn_analysis, covariates=covariates)

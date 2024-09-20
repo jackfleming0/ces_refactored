@@ -7,14 +7,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import NearestNeighbors
 from scipy.stats import ttest_ind
 import statsmodels.api as sm
+from sklearn.metrics import accuracy_score, classification_report, roc_curve, auc
 
 
 def analyze_ces_vs_churn(ces_data, churn_data_path, churn_window_days=1000):
     # Load churn data
     churn_data = pd.read_csv(churn_data_path)
-
-    print(f"Original CES data shape: {ces_data.shape}")
-    print(f"Original Churn data shape: {churn_data.shape}")
 
     # Convert ka and SiteID in CAA to string and ensure consistent formatting
     ces_data['ka'] = ces_data['ka'].astype(str).str.strip()
@@ -288,6 +286,7 @@ def visualize_ces_vs_churn(matched_data):
     sns.kdeplot(data=matched_data[matched_data['Churned'] == 1]['CES_Response_Value'], label='Churned', shade=True)
     plt.title('Density Plot of CES Scores for Churned vs Non-Churned Clients')
     plt.xlabel('CES Response Value')
+    plt.xlim(1, 7)
     plt.ylabel('Density')
     plt.legend()
     plt.tight_layout()
@@ -296,60 +295,184 @@ def visualize_ces_vs_churn(matched_data):
     # Plot the mean CES score for churned and non-churned clients
     ces_mean = matched_data.groupby('Churned')['CES_Response_Value'].mean().reset_index()
     plt.figure(figsize=(10, 6))
+
     sns.barplot(x='Churned', y='CES_Response_Value', data=ces_mean)
     plt.title('Mean CES Score for Churned and Non-Churned Clients')
     plt.xlabel('Churn Status (0 = Not Churned, 1 = Churned)')
     plt.ylabel('Mean CES Response Value')
+    plt.ylim(0, 7)
+
     plt.tight_layout()
     plt.show()
 
 
-def count_ces_scores_from_churned_clients(ces_data, churn_data_path):
+def count_ces_scores_from_churned_clients(ces_data, churn_data_path, churn_window_days=1000):
     # Load churn data
     churn_data = pd.read_csv(churn_data_path)
 
-    # Ensure both CES and churn data have the same data type for FE_Site_ID and SiteID in CAA
-    ces_data['FE_Site_ID'] = ces_data['FE_Site_ID'].astype(str)
-    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].astype(str)
+    print(f"Original CES data shape: {ces_data.shape}")
+    print(f"Original Churn data shape: {churn_data.shape}")
 
-    # Merge CES data with churn data to check for churn status
-    merged_data = pd.merge(ces_data, churn_data, left_on='FE_Site_ID', right_on='SiteID in CAA', how='left')
+    # Convert ka and SiteID in CAA to string and ensure consistent formatting
+    ces_data['ka'] = ces_data['ka'].astype(str).str.strip()
+    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].astype(str).str.strip()
 
-    # Count the number of CES responses from clients who churned
-    churned_ces_count = merged_data[merged_data['Churned'] == True].shape[0]
+    # Ensure Response_Timestamp is in datetime format
+    ces_data['Response_Timestamp'] = pd.to_datetime(ces_data['Response_Timestamp'])
 
-    print(f"Number of CES scores from clients that eventually churned: {churned_ces_count}")
+    # Convert Cancellation Scheduled Date to datetime
+    churn_data['Cancellation Scheduled Date'] = pd.to_datetime(churn_data['Cancellation Scheduled Date'])
 
-    return churned_ces_count
+    # Filter out churn data before February 1, 2024
+    cutoff_date = pd.Timestamp('2024-02-01')
+    churn_data = churn_data[churn_data['Cancellation Scheduled Date'] >= cutoff_date]
 
+    print(f"\nCES data shape after filtering: {ces_data.shape}")
+    print(f"Churn data shape after filtering: {churn_data.shape}")
 
-def logistic_regression_ces_on_churn(ces_data, churn_data_path, covariates):
-    # Step 1: Read churn data
-    churn_data = pd.read_csv(churn_data_path)
-
-    # Convert 'FE_Site_ID' to string and handle NaN values
-    ces_data['ka'] = ces_data['ka'].fillna('').astype(str)
-    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].fillna('').astype(str)
-
-    # Step 2: Merge CES data with churn data
+    # Merge CES data with churn data based on SiteID in CAA and ka
     merged_data = pd.merge(ces_data, churn_data, left_on='ka', right_on='SiteID in CAA', how='left')
 
-    # Step 2: Drop rows with missing values (if any)
-    merged_data = merged_data.dropna(subset=['CES_Response_Value', 'Churned'] + covariates)
+    print(f"\nMerged data shape: {merged_data.shape}")
 
-    # Step 3: Convert categorical variables (like 'ClientUser_Type') into dummy/indicator variables
-    merged_data = pd.get_dummies(merged_data, columns=['ClientUser_Type'], drop_first=True)
+    # Calculate days to churn
+    merged_data['Days_to_Churn'] = (merged_data['Cancellation Scheduled Date'] - merged_data['Response_Timestamp']).dt.days
 
-    # Step 4: Define X (covariates + CES score) and y (Churned)
-    X = merged_data[['CES_Response_Value'] + covariates]
+    # Modified churn detection logic
+    merged_data['Churned'] = merged_data['SiteID in CAA'].notna() & (
+            (merged_data['Cancellation Scheduled Date'].isna()) |  # Include matches without a cancellation date
+            (merged_data['Cancellation Scheduled Date'] >= merged_data['Response_Timestamp'])  # Future churns
+    )
+
+    # Count CES scores from churned clients
+    churned_ces_count = merged_data['Churned'].sum()
+
+    print(f"\nNumber of CES scores from clients that eventually churned: {churned_ces_count}")
+
+    # Additional statistics
+    print(f"\nTotal number of CES scores: {merged_data.shape[0]}")
+    print(f"Percentage of CES scores from churned clients: {(churned_ces_count / merged_data.shape[0]) * 100:.2f}%")
+
+    # Distribution of CES scores for churned vs non-churned clients
+    print("\nCES score statistics for churned clients:")
+    print(merged_data[merged_data['Churned']]['CES_Response_Value'].describe())
+
+    print("\nCES score statistics for non-churned clients:")
+    print(merged_data[~merged_data['Churned']]['CES_Response_Value'].describe())
+
+    return churned_ces_count, merged_data
+
+
+def logistic_regression_ces_on_churn(ces_data, churn_data_path, covariates, churn_window_days=1000):
+    # Load churn data
+    churn_data = pd.read_csv(churn_data_path)
+
+    print(f"Original CES data shape: {ces_data.shape}")
+    print(f"Original Churn data shape: {churn_data.shape}")
+
+    # Print column names for debugging
+    print("CES data columns:", ces_data.columns.tolist())
+    print("Churn data columns:", churn_data.columns.tolist())
+
+    # Convert ka and SiteID in CAA to string and ensure consistent formatting
+    ces_data['ka'] = ces_data['ka'].astype(str).str.strip()
+    churn_data['SiteID in CAA'] = churn_data['SiteID in CAA'].astype(str).str.strip()
+
+    # Ensure Response_Timestamp is in datetime format
+    ces_data['Response_Timestamp'] = pd.to_datetime(ces_data['Response_Timestamp'])
+
+    # Check if 'Cancellation Scheduled Date' exists in churn_data
+    if 'Cancellation Scheduled Date' in churn_data.columns:
+        # Convert Cancellation Scheduled Date to datetime
+        churn_data['Cancellation Scheduled Date'] = pd.to_datetime(churn_data['Cancellation Scheduled Date'])
+
+        # Filter out churn data before February 1, 2024
+        cutoff_date = pd.Timestamp('2024-02-01')
+        churn_data = churn_data[churn_data['Cancellation Scheduled Date'] >= cutoff_date]
+    else:
+        print("Warning: 'Cancellation Scheduled Date' not found in churn data.")
+
+    print(f"\nCES data shape after filtering: {ces_data.shape}")
+    print(f"Churn data shape after filtering: {churn_data.shape}")
+
+    # Merge CES data with churn data based on SiteID in CAA and ka
+    merged_data = pd.merge(ces_data, churn_data, left_on='ka', right_on='SiteID in CAA', how='left')
+
+    print(f"\nMerged data shape: {merged_data.shape}")
+    print("Merged data columns:", merged_data.columns.tolist())
+
+    # Check if necessary columns exist before calculating Days_to_Churn
+    if 'Cancellation Scheduled Date' in merged_data.columns and 'Response_Timestamp' in merged_data.columns:
+        merged_data['Days_to_Churn'] = (merged_data['Cancellation Scheduled Date'] - merged_data['Response_Timestamp']).dt.days
+    else:
+        print("Warning: Unable to calculate 'Days_to_Churn'. Required columns not found.")
+
+    # Modified churn detection logic
+    if 'SiteID in CAA' in merged_data.columns and 'Cancellation Scheduled Date' in merged_data.columns:
+        merged_data['Churned'] = merged_data['SiteID in CAA'].notna() & (
+                (merged_data['Cancellation Scheduled Date'].isna()) |  # Include matches without a cancellation date
+                (merged_data['Cancellation Scheduled Date'] >= merged_data['Response_Timestamp'])  # Future churns
+        )
+    elif 'Churned' not in merged_data.columns:
+        print("Warning: Unable to determine churn status. Using a placeholder 'Churned' column.")
+        merged_data['Churned'] = False  # Placeholder, adjust as needed
+
+    # Ensure all covariates exist in the merged data
+    existing_covariates = [cov for cov in covariates if cov in merged_data.columns]
+    if len(existing_covariates) < len(covariates):
+        print(f"Warning: Some covariates not found in data. Using only: {existing_covariates}")
+
+    # Drop rows with missing values in covariates or CES_Response_Value
+    merged_data = merged_data.dropna(subset=['CES_Response_Value'] + existing_covariates)
+
+    # Convert categorical variables into dummy/indicator variables
+    categorical_covariates = [cov for cov in existing_covariates if merged_data[cov].dtype == 'object']
+    merged_data = pd.get_dummies(merged_data, columns=categorical_covariates, drop_first=True)
+
+    # Update covariates list with dummy variable names
+    dummy_covariates = [col for col in merged_data.columns if any(cov in col for cov in categorical_covariates)]
+    updated_covariates = [cov for cov in existing_covariates if cov not in categorical_covariates] + dummy_covariates
+
+    # Prepare features (X) and target variable (y)
+    X = merged_data[['CES_Response_Value'] + updated_covariates]
     X = sm.add_constant(X)  # Add a constant term for the intercept
-    y = merged_data['Churned'].astype(int)  # Ensure y is numeric (0/1 for logistic regression)
+    y = merged_data['Churned'].astype(int)
 
-    # Step 5: Fit logistic regression model
+    # Fit logistic regression model
     logit_model = sm.Logit(y, X)
     result = logit_model.fit()
 
-    # Step 6: Display the summary
+    # Display the summary
     print(result.summary())
 
-    return result
+    # Additional analysis (assuming sklearn is imported)
+    print("\nOdds Ratios:")
+    print(np.exp(result.params))
+
+    print("\nConfidence Intervals:")
+    print(result.conf_int())
+
+    # Model evaluation
+    y_pred = result.predict(X)
+    y_pred_binary = (y_pred > 0.5).astype(int)
+
+    print("\nModel Accuracy:", accuracy_score(y, y_pred_binary))
+    print("\nClassification Report:")
+    print(classification_report(y, y_pred_binary))
+
+    # Plot ROC curve
+    fpr, tpr, thresholds = roc_curve(y, y_pred)
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (AUC = %0.2f)' % roc_auc)
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic (ROC) Curve')
+    plt.legend(loc="lower right")
+    plt.show()
+
+    return result, merged_data
