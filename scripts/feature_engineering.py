@@ -59,7 +59,134 @@ def create_db_cohort(df):
     return df
 
 
-def create_features(df, cohorts):
+def add_ad_spend_features(df, ad_spend_path, config):
+    """
+    Add ad spend features to CES data with both quintile and predefined binning.
+
+    Parameters:
+    df (pd.DataFrame): CES data with ClientSite_Name and Response_Timestamp
+    ad_spend_path (str): Path to ad spend CSV file
+    config (dict): Configuration dictionary containing binning parameters
+
+    Returns:
+    pd.DataFrame: Original dataframe with new ad spend columns and binning
+    """
+    # Load ad spend data
+    ad_spend = pd.read_csv(ad_spend_path)
+
+    # Convert CES timestamp to same format as ad spend data
+    df['MonthYear'] = pd.to_datetime(df['Response_Timestamp']).dt.strftime('%b-%y')
+
+    # Create matching key in both dataframes
+    df['matching_key'] = df['ClientSite_Name'] + '_' + df['MonthYear']
+    ad_spend['matching_key'] = ad_spend['Account name'] + '_' + ad_spend['Month']
+
+    # Create list of matches
+    matching_keys = set(ad_spend['matching_key'])
+    df['AdSpendYN'] = df['matching_key'].isin(matching_keys)
+
+    # Print match statistics
+    print(f"\nTotal CES records: {len(df)}")
+    print(f"Records with matching ad spend: {df['AdSpendYN'].sum()}")
+
+    # Select and rename columns from ad spend data
+    ad_spend_cols = {
+        'Cost': 'AdSpendCost',
+        'Clicks': 'AdSpendClicks',
+        'Impr.': 'AdSpendImpressions',
+        'CTR': 'AdSpendCTR',
+        'Avg. CPC': 'AdSpendCPC',
+        'Conversions': 'AdSpendConversions',
+        'Cost / conv.': 'AdSpendCostPerConversion',
+        'Conv. rate': 'AdSpendConversionRate',
+        'Search impr. share': 'AdSpendSearchImprShare',
+        'Search lost IS (budget)': 'AdSpendSearchLost'
+    }
+
+    # Create subset of ad spend data with renamed columns
+    ad_spend_subset = ad_spend[['matching_key'] + list(ad_spend_cols.keys())].copy()
+    ad_spend_subset = ad_spend_subset.rename(columns=ad_spend_cols)
+
+    # Function to safely convert percentages
+    def clean_percentage(value):
+        if pd.isna(value):
+            return value
+        if isinstance(value, str):
+            # Handle '< 10%' case
+            if '<' in value:
+                return float(value.replace('< ', '').rstrip('%')) / 100
+            return float(value.rstrip('%')) / 100
+        return value
+
+    # Function to safely convert currency
+    def clean_currency(value):
+        if pd.isna(value):
+            return value
+        if isinstance(value, str):
+            return float(value.replace('$', '').replace(',', ''))
+        return value
+
+    # Clean up percentage columns
+    percentage_cols = ['AdSpendCTR', 'AdSpendConversionRate', 'AdSpendSearchImprShare', 'AdSpendSearchLost']
+    for col in percentage_cols:
+        if col in ad_spend_subset.columns:
+            ad_spend_subset[col] = ad_spend_subset[col].apply(clean_percentage)
+
+    # Clean up currency columns
+    currency_cols = ['AdSpendCost', 'AdSpendCPC', 'AdSpendCostPerConversion']
+    for col in currency_cols:
+        if col in ad_spend_subset.columns:
+            ad_spend_subset[col] = ad_spend_subset[col].apply(clean_currency)
+
+    # Merge while keeping all CES records
+    df = df.merge(ad_spend_subset, on='matching_key', how='left')
+
+    # Add binning for AdSpend Cost (only for records with ad spend)
+    spend_mask = df['AdSpendYN'] & df['AdSpendCost'].notna()
+    if spend_mask.any():
+        # Quintile binning
+        df.loc[spend_mask, 'AdSpend_Quintile'] = pd.qcut(
+            df.loc[spend_mask, 'AdSpendCost'],
+            q=config['ad_spend_analysis']['quantile_bins'],
+            labels=False,
+            duplicates='drop'
+        ).add(1)  # Add 1 to make quintiles 1-based
+
+        # Predefined binning - using upper bounds
+        bins = config['ad_spend_analysis']['spend_brackets']['bins']
+        df.loc[spend_mask, 'AdSpend_Bins'] = pd.cut(
+            df.loc[spend_mask, 'AdSpendCost'],
+            bins=bins,
+            labels=[b for b in bins[1:]],  # Use upper bounds as labels
+            include_lowest=True
+        )
+
+    # Add binning for Cost Per Lead (only for records with ad spend and conversions)
+    cpl_mask = df['AdSpendYN'] & df['AdSpendCostPerConversion'].notna()
+    if cpl_mask.any():
+        # Quintile binning
+        df.loc[cpl_mask, 'AdSpendCPL_Quintile'] = pd.qcut(
+            df.loc[cpl_mask, 'AdSpendCostPerConversion'],
+            q=config['ad_spend_analysis']['quantile_bins'],
+            labels=False,
+            duplicates='drop'
+        ).add(1)  # Add 1 to make quintiles 1-based
+
+        # Predefined binning - using upper bounds
+        cpl_bins = config['ad_spend_analysis']['cost_per_lead_brackets']['bins']
+        df.loc[cpl_mask, 'AdSpendCPL_Bins'] = pd.cut(
+            df.loc[cpl_mask, 'AdSpendCostPerConversion'],
+            bins=cpl_bins,
+            labels=[b for b in cpl_bins[1:]],  # Use upper bounds as labels
+            include_lowest=True
+        )
+
+    # Clean up
+    df = df.drop(['matching_key', 'MonthYear'], axis=1)
+
+    return df
+
+def create_features(df, cohorts, config=None, ad_spend_path=None):
     logging.info("Starting feature engineering.")
 
     # Assign cohorts
@@ -83,6 +210,16 @@ def create_features(df, cohorts):
     df['Has_Partner'] = df['Partner1'].fillna('No').apply(lambda x: 'No' if x == 'No' else 'Yes')
 
     create_db_cohort(df)
+
+    # Add ad spend features if config and path are provided
+    if config is not None and ad_spend_path is not None:
+        logging.info("Adding ad spend features.")
+        df = add_ad_spend_features(df, ad_spend_path, config)
+    else:
+        logging.info("Skipping ad spend features due to missing config or path.")
+
+    logging.info("Feature engineering completed.")
+    return df
 
     logging.info("Feature engineering completed.")
     return df

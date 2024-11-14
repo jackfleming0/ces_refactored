@@ -189,7 +189,7 @@ def perform_combinatorial_analysis(df, base_columns, additional_columns, time_co
         #plot_heatmap(results)
         #plot_parallel_coordinates(results)
         #plot_network_graph(results)
-        plot_bubble_chart(results)
+        #plot_bubble_chart(results)
         #plot_treemap(results)
         #plot_radar_chart(results)
 

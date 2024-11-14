@@ -7,6 +7,7 @@ from stability_analysis import identify_top_stable_elastic_groups
 import numpy as np
 import plotly.io as pio
 import plotly.graph_objects as go
+import logging
 
 
 
@@ -481,6 +482,93 @@ def plot_ces_by_variable_and_response_group(df, variable_column, title=None):
     plt.tight_layout()
     plt.show()
 
+
+def plot_regional_ad_spend_analysis(df, save_path=None):
+    """
+    Create visualization showing regional patterns in ad spend and CES.
+
+    Parameters:
+    df (pandas.DataFrame): DataFrame with CES and ad spend features
+    save_path (str, optional): Path to save the visualization
+    """
+    # Create subplot grid
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+    # 1. Scatter plot of regional average CES vs average ad spend
+    regional_data = df.groupby('MLS_Region').agg({
+        'CES_Response_Value': 'mean',
+        'total_monthly_spend': 'mean',
+        'cost_per_lead': 'mean'
+    }).reset_index()
+
+    sns.scatterplot(x='total_monthly_spend', y='CES_Response_Value',
+                    size='cost_per_lead', data=regional_data, ax=ax1)
+    ax1.set_title('Regional Average CES vs Ad Spend')
+    ax1.set_xlabel('Average Monthly Spend')
+    ax1.set_ylabel('Average CES Score')
+    set_ces_y_axis(ax1)
+
+    # 2. Box plot of CES by region (top N regions by response count)
+    top_regions = df['MLS_Region'].value_counts().nlargest(10).index
+    region_data = df[df['MLS_Region'].isin(top_regions)]
+
+    sns.boxplot(x='MLS_Region', y='CES_Response_Value', data=region_data, ax=ax2)
+    ax2.set_xticklabels(ax2.get_xticklabels(), rotation=45)
+    ax2.set_title('CES Distribution by Top Regions')
+    ax2.set_xlabel('MLS Region')
+    ax2.set_ylabel('CES Score')
+    set_ces_y_axis(ax2)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+    plt.show()
+
+
+def plot_ad_spend_analysis(df):
+    """Plot key relationships between ad spend and CES."""
+    # Only analyze records with ad spend
+    ad_spend_data = df[df['AdSpendYN']].copy()
+
+    if len(ad_spend_data) == 0:
+        print("No ad spend data available for visualization")
+        return
+
+    plt.figure(figsize=(15, 5))
+
+    # 1. CES by Ad Spend Quintile
+    plt.subplot(1, 3, 1)
+    if 'AdSpend_Quintile' in ad_spend_data.columns:
+        sns.boxplot(x='AdSpend_Quintile', y='CES_Response_Value', data=ad_spend_data)
+        plt.title('CES Distribution by Ad Spend Quintile')
+        plt.xlabel('Ad Spend Quintile')
+        plt.ylabel('CES Score')
+        set_ces_y_axis(plt.gca())
+
+    # 2. CES by Predefined Spend Brackets
+    plt.subplot(1, 3, 2)
+    if 'AdSpend_Bins' in ad_spend_data.columns:
+        sns.boxplot(x='AdSpend_Bins', y='CES_Response_Value', data=ad_spend_data)
+        plt.title('CES by Ad Spend Bracket')
+        plt.xlabel('Monthly Ad Spend')
+        plt.ylabel('CES Score')
+        plt.xticks(rotation=45)
+        set_ces_y_axis(plt.gca())
+
+    # 3. Efficiency Categories
+    plt.subplot(1, 3, 3)
+    if 'Efficiency_Category' in ad_spend_data.columns:
+        sns.boxplot(x='Efficiency_Category', y='CES_Response_Value', data=ad_spend_data)
+        plt.title('CES by Efficiency Category')
+        plt.xlabel('Efficiency Category')
+        plt.ylabel('CES Score')
+        plt.xticks(rotation=45)
+        set_ces_y_axis(plt.gca())
+
+    plt.tight_layout()
+    plt.show()
+
 # Updated `generate_all_visualizations` function
 def generate_all_visualizations(df, model, config, combinatorial_results):
     print("Generating visualizations...")
@@ -559,6 +647,11 @@ def generate_all_visualizations(df, model, config, combinatorial_results):
 
     #18 PM Distrubtion
     plot_filtered_ces_distribution(df, 'CES_Response_Value')
+
+    #19 ad spend visualization
+    print("Generating ad spend analysis visualizations...")
+    print("haven't done this yet")
+    plot_ad_spend_analysis(df)
 
     #00 Sankey
     #plot_ces_sankey_diagram(df, 'ClientUser_Type', 'CES_Response')

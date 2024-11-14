@@ -23,6 +23,9 @@ cohorts:
   Group 4:
     start: '2024-08-28'
     end: '2024-09-10'
+  Group 5:
+    start: '2024-10-25'
+    end: '2024-11-12'
 
 columns_to_bin:
   ClientUser_Cnt: 4
@@ -31,6 +34,15 @@ columns_to_bin:
   30DayPageViews: 4
   Plan_Amt_Dec23: 4
   leads_per_seat: 4
+
+ad_spend_analysis:
+  quantile_bins: 5  # Number of quantiles for dynamic binning
+  spend_brackets:  # Predefined spend brackets
+    bins: [0, 500, 1000, 2000, 3000, inf]
+    labels: ['<$501', '$501-$1000', '$1001-$2000', '$2001-$3000', '>$3000']
+  cost_per_lead_brackets:  # Optional: Add if you want predefined CPL brackets too
+    bins: [0, 10, 25, 50, 100, inf]
+    labels: ['Very Efficient', 'Efficient', 'Average', 'Inefficient', 'Very Inefficient']
 
 modeling:
   feature_columns:

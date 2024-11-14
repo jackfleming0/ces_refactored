@@ -2,7 +2,8 @@ import logging
 from data_loading import load_config, load_data
 from data_cleaning import clean_data
 from feature_engineering import create_features
-from eda import aggregate_ces_by_column, plot_ces_distribution, analyze_ces_vs_content_pages
+from eda import aggregate_ces_by_column, plot_ces_distribution, analyze_ces_vs_content_pages, analyze_ces_vs_ad_spend, format_ad_analysis_results, format_category_stats
+
 from churn_analysis import (analyze_ces_vs_churn,
                             run_psm_analysis,
                             visualize_ces_vs_churn,
@@ -13,6 +14,7 @@ from utils import bin_numerical_column
 from sklearn.model_selection import train_test_split
 from visualization import generate_all_visualizations
 from stability_analysis import perform_combinatorial_analysis
+import pandas as pd
 
 
 
@@ -29,7 +31,12 @@ def main():
                                 config['preprocessing']['date_formats'])
 
     # Feature engineering - creating calculated variables
-    ces_data_fe = create_features(ces_data_clean, config['cohorts'])
+    ces_data_fe = create_features(
+        ces_data_clean,
+        config['cohorts'],
+        config=config,  # Added config parameter
+        ad_spend_path='../data/All Accounts-Table 1.csv'  # Added ad spend path
+    )
 
     #debugging lines
     print(ces_data.head().to_dict())
@@ -40,15 +47,51 @@ def main():
         ces_data_fe = bin_numerical_column(ces_data_fe, column, n_bins)
 
     # EDA
+    print("\nPerforming exploratory data analysis...")
+
+    # Basic CES analysis
     aggregate_ces = aggregate_ces_by_column(ces_data_fe, 'ClientUser_Type', 'User Type')
     plot_ces_distribution(ces_data_fe, 'ClientUser_Type', save_path='../outputs/figures/ces_distribution.png')
+
+    # Content pages analysis
+    print("\nAnalyzing CES vs content pages...")
     ces_vs_content_pages_analysis = analyze_ces_vs_content_pages(ces_data_fe)
+
+    # Ad spend analysis
+    # Ad spend analysis
+    print("\nPerforming ad spend analysis...")
+    ad_spend_data, correlations, stats_summary = analyze_ces_vs_ad_spend(ces_data_fe)
+
+    # Format and display results
+    format_ad_analysis_results(correlations, stats_summary)
+
+    # Save ad spend correlations
+    if correlations:
+        correlation_df = pd.DataFrame.from_dict(correlations, orient='index', columns=['Correlation with CES'])
+        correlation_df.to_csv('../outputs/analyses/ad_spend_correlations.csv')
+        print(f"\nAd spend correlations saved to '../outputs/analyses/ad_spend_correlations.csv'")
+
+        # Log top correlations
+        print("\nTop 3 strongest ad spend correlations:")
+        for metric, corr in sorted(correlations.items(), key=lambda x: abs(x[1]), reverse=True)[:3]:
+            print(f"{metric}: {corr:.3f}")
+
+    # Log key statistical findings
+    if stats_summary:
+        print("\nStatistical test results:")
+        for test, results in stats_summary.items():
+            if isinstance(results, dict):
+                if 'f_stat' in results and 'p_value' in results:
+                    print(f"{test}: F={results['f_stat']:.2f}, p={results['p_value']:.4f}")
+                else:
+                    print(f"{test}: {results}")
+            else:
+                print(f"{test}: {results}")
 
     # Statistical tests
     t_stat, p_value = t_test_between_groups(ces_data_fe, 'Response_Group', 'CES_Response_Value', 'Group 1', 'Group 2')
     print(t_stat)
     print(p_value)
-    print ("3.4")
     t_stat, p_value = t_test_between_groups(ces_data_fe, 'Response_Group', 'CES_Response_Value', 'Group 3', 'Group 4')
     print(t_stat)
     print(p_value)
