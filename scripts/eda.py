@@ -4,8 +4,9 @@ import seaborn as sns
 import numpy as np
 import logging
 import re
+from statistical_tests import t_test_between_groups
 from scipy import stats
-
+from utils import OutputFormatter
 
 def aggregate_ces_by_column(df, column_name, segment_name):
     logging.info(f"Aggregating CES by {column_name}.")
@@ -121,6 +122,69 @@ def analyze_ces_vs_content_pages(ces_data):
     plt.show()
 
     return clean_data
+
+
+def analyze_cohort_comparisons(df, config, group_column='Response_Group', value_column='CES_Response_Value'):
+    """
+    Performs pairwise comparisons between all cohort groups and formats the results.
+
+    Args:
+        df: DataFrame containing the data
+        config: Configuration dictionary containing cohort definitions
+        group_column: Column containing cohort group labels
+        value_column: Column containing the values to compare
+    """
+    # Get cohorts from config and sort them by start date
+    cohort_info = []
+    for group, dates in config['cohorts'].items():
+        cohort_info.append({
+            'group': group,
+            'start_date': pd.to_datetime(dates['start'])
+        })
+
+    # Sort cohorts by start date
+    cohort_info = sorted(cohort_info, key=lambda x: x['start_date'])
+    cohorts = [c['group'] for c in cohort_info]
+
+    # Verify all cohorts exist in the data
+    existing_cohorts = df[group_column].unique()
+    cohorts = [c for c in cohorts if c in existing_cohorts]
+
+    results = []
+    # Perform all pairwise comparisons
+    for i, cohort1 in enumerate(cohorts):
+        for cohort2 in cohorts[i + 1:]:  # Compare with all subsequent cohorts
+            t_stat, p_value = t_test_between_groups(
+                df,
+                group_column,
+                value_column,
+                cohort1,
+                cohort2
+            )
+
+            # Calculate mean values and sample sizes for each group
+            group1_stats = df[df[group_column] == cohort1][value_column]
+            group2_stats = df[df[group_column] == cohort2][value_column]
+
+            results.append({
+                'comparison': f"{cohort1} vs {cohort2}",
+                'cohort1': cohort1,
+                'cohort2': cohort2,
+                'cohort1_n': len(group1_stats),
+                'cohort2_n': len(group2_stats),
+                'cohort1_mean': group1_stats.mean(),
+                'cohort2_mean': group2_stats.mean(),
+                't_statistic': t_stat,
+                'p_value': p_value,
+                'significant': p_value < 0.05,
+                'cohort1_start': config['cohorts'][cohort1]['start'],
+                'cohort2_start': config['cohorts'][cohort2]['start']
+            })
+
+    # Format and print results
+    print(OutputFormatter.format_cohort_comparison_results(results))
+
+    return results
 
 
 def analyze_ces_vs_ad_spend(ces_data):
@@ -364,6 +428,44 @@ def analyze_ces_vs_ad_spend(ces_data):
 
     return ad_spend_data, correlations, stats_summary
 
+
+def analyze_ad_spend_difference(df):
+    """Compare CES scores between respondents with and without ad spend."""
+    # Ensure CES_Response_Value is numeric
+    df['CES_Response_Value'] = pd.to_numeric(df['CES_Response_Value'], errors='coerce')
+
+    # Split into groups
+    with_ad_spend = df[df['AdSpendYN']]['CES_Response_Value'].dropna()
+    without_ad_spend = df[~df['AdSpendYN']]['CES_Response_Value'].dropna()
+
+    # Calculate basic statistics
+    stats_dict = {
+        'With Ad Spend': {
+            'n': len(with_ad_spend),
+            'mean': with_ad_spend.mean(),
+            'std': with_ad_spend.std()
+        },
+        'Without Ad Spend': {
+            'n': len(without_ad_spend),
+            'mean': without_ad_spend.mean(),
+            'std': without_ad_spend.std()
+        }
+    }
+
+    # Perform t-test
+    t_stat, p_value = stats.ttest_ind(with_ad_spend, without_ad_spend)
+
+    # Print results
+    print("\nAd Spend vs No Ad Spend Analysis:")
+    print("-" * 50)
+    print(f"{'Group':20} {'n':>6} {'Mean CES':>10} {'Std Dev':>10}")
+    print("-" * 50)
+    for group, data in stats_dict.items():
+        print(f"{group:20} {data['n']:6d} {data['mean']:10.2f} {data['std']:10.2f}")
+
+    print(f"\nT-test results: t={t_stat:.2f}, p={p_value:.4f}")
+
+    return t_stat, p_value, stats_dict
 
 def format_ad_analysis_results(correlations, stats_summary):
     """Format analysis results for clear display."""

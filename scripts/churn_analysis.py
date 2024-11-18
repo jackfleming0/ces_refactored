@@ -8,6 +8,7 @@ from sklearn.neighbors import NearestNeighbors
 from scipy.stats import ttest_ind
 import statsmodels.api as sm
 from sklearn.metrics import accuracy_score, classification_report, roc_curve, auc
+from utils import OutputFormatter
 
 
 def analyze_ces_vs_churn(ces_data, churn_data_path, churn_window_days=1000):
@@ -34,15 +35,17 @@ def analyze_ces_vs_churn(ces_data, churn_data_path, churn_window_days=1000):
     cutoff_date = pd.Timestamp('2024-02-01')
     churn_data = churn_data[churn_data['Cancellation Scheduled Date'] >= cutoff_date]
 
-    print(f"\nCES data shape after filtering: {ces_data.shape}")
-    print(f"Churn data shape after filtering: {churn_data.shape}")
+    # print(f"\nCES data shape after filtering: {ces_data.shape}")
+    # print(f"Churn data shape after filtering: {churn_data.shape}")
+    #
+    # print(f"\nUnique ka in CES data: {ces_data['ka'].nunique()}")
+    # print(f"Unique SiteIDs in churn data: {churn_data['SiteID in CAA'].nunique()}")
+    #
+    # print(f"\nCES data date range: {ces_data['Response_Timestamp'].min()} to {ces_data['Response_Timestamp'].max()}")
+    # print(
+    #     f"Churn data date range: {churn_data['Cancellation Scheduled Date'].min()} to {churn_data['Cancellation Scheduled Date'].max()}")
 
-    print(f"\nUnique ka in CES data: {ces_data['ka'].nunique()}")
-    print(f"Unique SiteIDs in churn data: {churn_data['SiteID in CAA'].nunique()}")
-
-    print(f"\nCES data date range: {ces_data['Response_Timestamp'].min()} to {ces_data['Response_Timestamp'].max()}")
-    print(
-        f"Churn data date range: {churn_data['Cancellation Scheduled Date'].min()} to {churn_data['Cancellation Scheduled Date'].max()}")
+    print(OutputFormatter.format_data_overview(ces_data, churn_data))
 
     # Merge CES data with churn data based on SiteID in CAA and ka
     merged_data = pd.merge(ces_data, churn_data, left_on='ka', right_on='SiteID in CAA', how='left')
@@ -86,41 +89,61 @@ def analyze_ces_vs_churn(ces_data, churn_data_path, churn_window_days=1000):
     print(f"\nTotal matches considered as churned: {churned_count}")
 
     # Print sample of matched data
-    print("\nSample of matched data:")
-    print(merged_data[merged_data['SiteID in CAA'].notna()][
-              ['ka', 'SiteID in CAA', 'Response_Timestamp', 'Cancellation Scheduled Date', 'Days_to_Churn',
-               'Churned']].head(20))
+    # print("\nSample of matched data:")
+    # print(merged_data[merged_data['SiteID in CAA'].notna()][
+    #           ['ka', 'SiteID in CAA', 'Response_Timestamp', 'Cancellation Scheduled Date', 'Days_to_Churn',
+    #            'Churned']].head(20))
 
     # Distribution of days to churn for churned clients
     churned_clients = merged_data[merged_data['Churned'] == True]
     print("\nDays to Churn statistics for churned clients:")
     print(churned_clients['Days_to_Churn'].describe())
 
-    # Correlation between CES score and days to churn
-    correlation = churned_clients['CES_Response_Value'].corr(churned_clients['Days_to_Churn'])
-    print(f"\nCorrelation between CES score and Days to Churn: {correlation}")
-
-    # Average CES score for churned vs non-churned clients
+    # Calculate CES Statistics
     avg_ces_churned = merged_data[merged_data['Churned'] == True]['CES_Response_Value'].mean()
     avg_ces_non_churned = merged_data[merged_data['Churned'] == False]['CES_Response_Value'].mean()
-    print(f"\nAverage CES score for churned clients: {avg_ces_churned}")
-    print(f"Average CES score for non-churned clients: {avg_ces_non_churned}")
 
-    # Churn rate for different time windows
+    # Calculate Churn Rates by Time Window
+    churn_rates = {}
     for window in [30, 90, 180, 365]:
-        churn_rate = (merged_data['Days_to_Churn'].between(0, window)).mean() * 100
-        print(f"Churn rate within {window} days: {churn_rate:.2f}%")
+        rate = (merged_data['Days_to_Churn'].between(0, window)).mean() * 100
+        churn_rates[f"Within {window} days"] = rate
 
-    # Overall churn rate
-    overall_churn_rate = (merged_data['Churned'] == True).mean() * 100
-    print(f"\nOverall churn rate: {overall_churn_rate:.2f}%")
-
-    # Churn rates for different CES score ranges
+    # Calculate CES Score Range Rates
+    ces_range_rates = {}
     for score_range in [(1, 3), (4, 5), (6, 7)]:
-        rate = merged_data[(merged_data['CES_Response_Value'].between(score_range[0], score_range[1])) &
-                           (merged_data['Churned'] == True)].shape[0] / \
-               merged_data[merged_data['CES_Response_Value'].between(score_range[0], score_range[1])].shape[0] * 100
-        print(f"Churn rate for CES scores {score_range}: {rate:.2f}%")
+        denominator = merged_data[merged_data['CES_Response_Value'].between(score_range[0], score_range[1])].shape[0]
+        if denominator > 0:  # Avoid division by zero
+            numerator = merged_data[
+                (merged_data['CES_Response_Value'].between(score_range[0], score_range[1])) &
+                (merged_data['Churned'] == True)
+                ].shape[0]
+            rate = (numerator / denominator) * 100
+            ces_range_rates[f"CES {score_range[0]}-{score_range[1]}"] = rate
+
+    # Print formatted analysis results
+    print("\n" + "=" * 50)
+    print(OutputFormatter.format_churn_analysis(
+        avg_ces_churned,
+        avg_ces_non_churned,
+        churn_rates
+    ))
+
+    # Add CES Score Range Analysis
+    print("\nChurn Rate by CES Score Range")
+    print("-" * 40)
+    print(f"{'Score Range':<20} {'Rate':>10}")
+    print("-" * 40)
+    for range_label, rate in ces_range_rates.items():
+        print(f"{range_label:<20} {rate:>9.1f}%")
+
+    # Print correlation information in a clear format
+    correlation = churned_clients['CES_Response_Value'].corr(churned_clients['Days_to_Churn'])
+    print("\nCorrelation Analysis")
+    print("-" * 40)
+    print(f"{'Metric':<30} {'Value':>10}")
+    print("-" * 40)
+    print(f"{'CES vs Days to Churn':<30} {correlation:>10.3f}")
 
     return merged_data
 
@@ -310,8 +333,8 @@ def count_ces_scores_from_churned_clients(ces_data, churn_data_path, churn_windo
     # Load churn data
     churn_data = pd.read_csv(churn_data_path)
 
-    print(f"Original CES data shape: {ces_data.shape}")
-    print(f"Original Churn data shape: {churn_data.shape}")
+    # print(f"Original CES data shape: {ces_data.shape}")
+    # print(f"Original Churn data shape: {churn_data.shape}")
 
     # Convert ka and SiteID in CAA to string and ensure consistent formatting
     ces_data['ka'] = ces_data['ka'].astype(str).str.strip()
@@ -371,8 +394,8 @@ def logistic_regression_ces_on_churn(ces_data, churn_data_path, covariates, chur
     print(f"Original Churn data shape: {churn_data.shape}")
 
     # Print column names for debugging
-    print("CES data columns:", ces_data.columns.tolist())
-    print("Churn data columns:", churn_data.columns.tolist())
+    # print("CES data columns:", ces_data.columns.tolist())
+    # print("Churn data columns:", churn_data.columns.tolist())
 
     # Convert ka and SiteID in CAA to string and ensure consistent formatting
     ces_data['ka'] = ces_data['ka'].astype(str).str.strip()
@@ -392,14 +415,14 @@ def logistic_regression_ces_on_churn(ces_data, churn_data_path, covariates, chur
     else:
         print("Warning: 'Cancellation Scheduled Date' not found in churn data.")
 
-    print(f"\nCES data shape after filtering: {ces_data.shape}")
-    print(f"Churn data shape after filtering: {churn_data.shape}")
+    # print(f"\nCES data shape after filtering: {ces_data.shape}")
+    # print(f"Churn data shape after filtering: {churn_data.shape}")
 
     # Merge CES data with churn data based on SiteID in CAA and ka
     merged_data = pd.merge(ces_data, churn_data, left_on='ka', right_on='SiteID in CAA', how='left')
 
-    print(f"\nMerged data shape: {merged_data.shape}")
-    print("Merged data columns:", merged_data.columns.tolist())
+    # print(f"\nMerged data shape: {merged_data.shape}")
+    # print("Merged data columns:", merged_data.columns.tolist())
 
     # Check if necessary columns exist before calculating Days_to_Churn
     if 'Cancellation Scheduled Date' in merged_data.columns and 'Response_Timestamp' in merged_data.columns:

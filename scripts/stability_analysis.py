@@ -8,6 +8,7 @@ import seaborn as sns
 import plotly.graph_objects as go
 import plotly.express as px
 import networkx as nx
+from utils import OutputFormatter
 
 
 def enhanced_analyze_group_stability(df, group_columns, time_column, ces_column, min_responses):
@@ -163,35 +164,62 @@ def generate_column_combinations(columns, min_combo, max_combo):
 
 def perform_combinatorial_analysis(df, base_columns, additional_columns, time_column, ces_column, min_responses,
                                    min_combo, max_combo):
+    """
+    Perform combinatorial analysis across different feature combinations.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame
+        base_columns (list): Columns to always include
+        additional_columns (list): Columns to create combinations from
+        time_column (str): Column containing time information
+        ces_column (str): Column containing CES scores
+        min_responses (int): Minimum number of responses required
+        min_combo (int): Minimum number of additional columns in combinations
+        max_combo (int): Maximum number of additional columns in combinations
+    """
     column_combinations = generate_column_combinations(additional_columns, min_combo, max_combo)
     results = {}
-    for combo in column_combinations:
+
+    total_combinations = len(column_combinations)
+
+    for i, combo in enumerate(column_combinations, 1):
         group_columns = base_columns + list(combo)
         combo_name = " + ".join(group_columns)
 
-        # Debugging: Ensure 'db_number' and other columns exist in the DataFrame
-        print(f"Analyzing combination: {combo_name}")
-        if 'db_number' in group_columns:
-            print(f"Unique values in db_number: {df['db_number'].unique()}")
+        # Print formatted header for this combination
+        print(OutputFormatter.format_combination_analysis_header(
+            combo_name,
+            total_combinations,
+            i
+        ))
 
-        # Double-check for NaN values in db_number and drop them
+        # Handle db_number specific logic with formatted output
         if 'db_number' in group_columns:
+            unique_values = sorted(df['db_number'].unique())
+            print(OutputFormatter.format_category_distribution(
+                {str(val): (df['db_number'] == val).sum() for val in unique_values},
+                title="Database Distribution"
+            ))
+
+            # Clean data by removing NaN values
             df = df.dropna(subset=['db_number'])
+            print(f"Records after removing NaN from db_number: {len(df)}")
 
-        # Optionally, make a copy of the DataFrame to avoid issues with view vs copy
-        df = df.copy()
+        # Create a copy of the DataFrame to avoid SettingWithCopyWarning
+        df_analysis = df.copy()
 
-        # Call the stability analysis function
-        stability_results = enhanced_analyze_group_stability(df, group_columns, time_column, ces_column, min_responses)
+        # Perform stability analysis
+        stability_results = enhanced_analyze_group_stability(
+            df_analysis,
+            group_columns,
+            time_column,
+            ces_column,
+            min_responses
+        )
         results[combo_name] = stability_results
 
-        # Call the functions to generate the visualizations
-        #plot_heatmap(results)
-        #plot_parallel_coordinates(results)
-        #plot_network_graph(results)
-        #plot_bubble_chart(results)
-        #plot_treemap(results)
-        #plot_radar_chart(results)
+        # Add visual separator between combinations
+        print("\n" + "=" * 50 + "\n")
 
     return results
 
