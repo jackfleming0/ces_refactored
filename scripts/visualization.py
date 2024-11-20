@@ -526,6 +526,248 @@ def plot_regional_ad_spend_analysis(df, save_path=None):
     plt.show()
 
 
+def generate_ad_spend_visualizations(df):
+    """Generate comprehensive visualizations for ad spend analysis."""
+    print("Generating ad spend visualizations...")
+
+    # Start with the overall comparison
+    print("\nGenerating ad spend vs no ad spend comparison...")
+    plot_ad_spend_comparison(df)
+
+    # Only analyze records with ad spend
+    ad_spend_data = df[df['AdSpendYN']].copy()
+
+    if len(ad_spend_data) == 0:
+        print("No ad spend data available for visualization")
+        return
+
+    # 1. Correlation Analysis Plot
+    plt.figure(figsize=(12, 6))
+    correlations = {
+        'AdSpendCTR': 0.129,
+        'AdSpendSearchImprShare': 0.088,
+        'AdSpendConversions': 0.057,
+        'AdSpendCost': 0.044,
+        'ConversionsPerSeat': 0.017,
+        'AdSpendCPC': -0.008,
+        'SpendPerSeat': -0.006,
+        'AdSpendCostPerConversion': -0.003
+    }
+
+    # Sort by absolute value
+    sorted_correlations = dict(sorted(correlations.items(),
+                                      key=lambda x: abs(x[1]),
+                                      reverse=True))
+
+    ax = sns.barplot(x=list(sorted_correlations.values()),
+                     y=list(sorted_correlations.keys()),
+                     palette='viridis')
+
+    # Add value labels
+    for i, v in enumerate(sorted_correlations.values()):
+        ax.text(v + (0.01 if v >= 0 else -0.01),
+                i,
+                f'{v:.3f}',
+                va='center',
+                fontweight='bold')
+
+    plt.title('Ad Spend Metrics Correlation with CES')
+    plt.xlabel('Correlation Coefficient')
+    plt.axvline(x=0, color='black', linestyle='--', alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    # 2. Efficiency Categories Analysis
+    plt.figure(figsize=(12, 6))
+    efficiency_data = {
+        'High Spend, High Conv.': {'mean': 5.36, 'n': 101},
+        'High Spend, Low Conv.': {'mean': 5.44, 'n': 25},
+        'Low Spend, High Conv.': {'mean': 5.57, 'n': 23},
+        'Low Spend, Low Conv.': {'mean': 5.12, 'n': 60}
+    }
+
+    means = [v['mean'] for v in efficiency_data.values()]
+    categories = list(efficiency_data.keys())
+
+    ax = sns.barplot(x=categories, y=means, palette='viridis')
+
+    # Add both sample size and mean value annotations
+    for i, (cat, data) in enumerate(efficiency_data.items()):
+        # Add mean value at top of bar
+        ax.text(i, data['mean'], f'CES: {data["mean"]:.2f}',
+                ha='center', va='bottom', fontweight='bold')
+        # Add sample size below category label
+        ax.text(i, -0.1, f'n={data["n"]}',
+                ha='center', va='top', color='darkblue')
+
+    plt.title('CES by Efficiency Category')
+    plt.xlabel('Category')
+    plt.ylabel('Mean CES Score')
+    set_ces_y_axis(ax)
+    # Adjust bottom margin to accommodate sample size labels
+    plt.margins(y=0.2)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+    # 3. Spend Distribution Analysis
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+    spend_data = {
+        '>$3,000': {'pct': 58.9, 'ces': 5.36},
+        '$2,001-$3,000': {'pct': 20.6, 'ces': 5.44},
+        '$1,001-$2,000': {'pct': 5.3, 'ces': 5.00},
+        '≤$500': {'pct': 15.3, 'ces': 5.12}
+    }
+
+    # Pie chart
+    plt.sca(ax1)
+    patches, texts, autotexts = plt.pie(
+        [v['pct'] for v in spend_data.values()],
+        labels=[f"{k}\n({v['pct']}%)" for k, v in spend_data.items()],
+        autopct='%1.1f%%',
+        colors=sns.color_palette('viridis', n_colors=len(spend_data)))
+
+    # Make percentage labels more visible
+    for autotext in autotexts:
+        autotext.set_color('white')
+        autotext.set_fontweight('bold')
+
+    plt.title('Distribution of Ad Spend')
+
+    # CES by spend level
+    plt.sca(ax2)
+    bars = sns.barplot(x=list(spend_data.keys()),
+                       y=[v['ces'] for v in spend_data.values()],
+                       palette='viridis')
+
+    # Add value labels on bars
+    for i, v in enumerate(spend_data.values()):
+        bars.text(i, v['ces'], f'CES: {v["ces"]:.2f}',
+                  ha='center', va='bottom', fontweight='bold')
+
+    plt.title('Mean CES by Spend Level')
+    set_ces_y_axis(ax2)
+    plt.xticks(rotation=45)
+
+    plt.tight_layout()
+    plt.show()
+
+    # 4. Quintile Analysis
+    if 'AdSpend_Quintile' in ad_spend_data.columns:
+        plt.figure(figsize=(10, 6))
+
+        # Calculate means for each quintile for labels
+        quintile_means = ad_spend_data.groupby('AdSpend_Quintile')['CES_Response_Value'].agg(
+            ['mean', 'count']).reset_index()
+
+        ax = sns.boxplot(x='AdSpend_Quintile',
+                         y='CES_Response_Value',
+                         data=ad_spend_data,
+                         palette='viridis')
+
+        # Add mean and count labels
+        for i, row in quintile_means.iterrows():
+            ax.text(i, row['mean'], f'Mean: {row["mean"]:.2f}\nn={row["count"]}',
+                    ha='center', va='bottom', fontweight='bold')
+
+        plt.title('CES Distribution by Ad Spend Quintile')
+        set_ces_y_axis(ax)
+        plt.tight_layout()
+        plt.show()
+
+    print("Ad spend visualizations completed.")
+
+
+def plot_ad_spend_comparison(df):
+    """Compare CES scores between clients with and without ad spend."""
+    # Create comparison groups
+    with_ad_spend = df[df['AdSpendYN']]['CES_Response_Value']
+    without_ad_spend = df[~df['AdSpendYN']]['CES_Response_Value']
+
+    # Calculate statistics
+    stats = {
+        'With Ad Spend': {
+            'mean': with_ad_spend.mean(),
+            'std': with_ad_spend.std(),
+            'n': len(with_ad_spend),
+            'data': with_ad_spend
+        },
+        'Without Ad Spend': {
+            'mean': without_ad_spend.mean(),
+            'std': without_ad_spend.std(),
+            'n': len(without_ad_spend),
+            'data': without_ad_spend
+        }
+    }
+
+    # Create visualization
+    plt.figure(figsize=(12, 6))
+
+    # Create side-by-side box plots with individual points
+    ax = plt.gca()
+
+    # Box plots
+    sns.boxplot(x=df['AdSpendYN'].map({True: 'With Ad Spend', False: 'Without Ad Spend'}),
+                y='CES_Response_Value', data=df,
+                palette='viridis',
+                width=0.5)
+
+    # Add individual points
+    sns.stripplot(x=df['AdSpendYN'].map({True: 'With Ad Spend', False: 'Without Ad Spend'}),
+                  y='CES_Response_Value', data=df,
+                  size=4, color=".3", alpha=0.3)
+
+    # Add detailed statistics annotations
+    for i, (label, data) in enumerate(stats.items()):
+        # Add mean line
+        plt.hlines(y=data['mean'], xmin=i - 0.2, xmax=i + 0.2,
+                   color='red', linestyle='--', linewidth=2)
+
+        # Add text box with statistics
+        stats_text = f"Mean: {data['mean']:.2f}\n"
+        stats_text += f"Std: {data['std']:.2f}\n"
+        stats_text += f"n: {data['n']}"
+
+        plt.text(i, 7.2, stats_text,
+                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'),
+                 ha='center', va='bottom',
+                 fontweight='bold')
+
+    # Add percentage of total responses
+    total_responses = len(df)
+    for i, (label, data) in enumerate(stats.items()):
+        percentage = (data['n'] / total_responses) * 100
+        plt.text(i, 0.5, f"{percentage:.1f}% of responses",
+                 ha='center', va='bottom',
+                 fontweight='bold', color='darkblue')
+
+    # Customize the plot
+    plt.title('CES Comparison: Clients With vs Without Ad Spend', pad=40)
+    plt.xlabel('')
+    plt.ylabel('CES Score')
+    set_ces_y_axis(ax)
+
+    # Add significance test result if applicable
+    from scipy import stats
+    t_stat, p_value = stats.ttest_ind(with_ad_spend, without_ad_spend)
+    significance_text = f"T-test p-value: {p_value:.4f}"
+    if p_value < 0.05:
+        significance_text += "*"
+    if p_value < 0.01:
+        significance_text += "*"
+    if p_value < 0.001:
+        significance_text += "*"
+
+    plt.text(0.5, -0.5, significance_text,
+             ha='center', va='top',
+             transform=ax.transAxes,
+             fontweight='bold',
+             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+
+    plt.tight_layout()
+    plt.show()
+
 def plot_ad_spend_analysis(df):
     """Plot key relationships between ad spend and CES."""
     # Only analyze records with ad spend
@@ -652,6 +894,7 @@ def generate_all_visualizations(df, model, config, combinatorial_results):
     print("Generating ad spend analysis visualizations...")
     print("haven't done this yet")
     plot_ad_spend_analysis(df)
+    generate_ad_spend_visualizations(df)
 
     #00 Sankey
     #plot_ces_sankey_diagram(df, 'ClientUser_Type', 'CES_Response')

@@ -241,7 +241,8 @@ There's some pretty robust visualization stuff, though the styling could certain
 * Verify file paths in config.yaml
 * Check CSV file encoding
 * Ensure date formats match configuration
-* MAKE SURE THAT CONFIG.YAML IS UPDATED WITH EACH COHORT DATES 
+* MAKE SURE THAT CONFIG.YAML IS UPDATED WITH EACH COHORT DATES
+* You gotta make sure that the site ID in the churned clients sheet is set to Format>Number>Automatic vs whatever it comes in as. not sure the deal tbh 
 
 ### Visualization Errors
 
