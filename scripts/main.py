@@ -14,7 +14,7 @@ from statistical_tests import t_test_between_groups, anova_test, tukey_hsd_test
 from modeling import prepare_data_for_modeling, train_random_forest, evaluate_model, cross_validate_model
 from utils import bin_numerical_column, OutputFormatter
 from sklearn.model_selection import train_test_split
-from visualization import generate_all_visualizations
+from visualization import generate_all_visualization_calls
 from stability_analysis import perform_combinatorial_analysis
 import pandas as pd
 from scipy import stats
@@ -205,7 +205,7 @@ def main():
     print(OutputFormatter.format_cross_validation_results(rmse_scores, "Cross-validation RMSE Analysis"))
 
     # Generate all visualizations
-    generate_all_visualizations(ces_data_fe, model, config, combinatorial_results)
+    generate_all_visualization_calls(ces_data_fe, model, config, combinatorial_results)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -8,6 +9,8 @@ import numpy as np
 import plotly.io as pio
 import plotly.graph_objects as go
 import logging
+from scipy import stats as scipy_stats
+import time
 
 
 
@@ -450,17 +453,14 @@ def plot_filtered_ces_distribution(df, ces_column='CES_Response_Value'):
 
 
 def plot_ces_by_variable_and_response_group(df, variable_column, title=None):
+    # Get all unique response groups and sort them
+    group_order = sorted(df['Response_Group'].unique(),
+                        key=lambda x: int(x.split()[-1]))
 
-    #This produces a line chart.
-
-
-    # Ensure 'Response_Group' is in the correct order
-    group_order = ['Group 1', 'Group 2', 'Group 3', 'Group 4']
-
-    # Calculate mean CES for each combination of the variable and Response_Group
+    # Calculate mean CES for each combination
     grouped_data = df.groupby([variable_column, 'Response_Group'])['CES_Response_Value'].mean().unstack()
 
-    # Reorder columns based on the specified order
+    # Reorder columns based on the sorted order
     grouped_data = grouped_data.reindex(columns=group_order)
 
     # Create the line plot
@@ -481,6 +481,8 @@ def plot_ces_by_variable_and_response_group(df, variable_column, title=None):
     # Show the plot
     plt.tight_layout()
     plt.show()
+    time.sleep(3)  # Add delay
+    plt.close()
 
 
 def plot_regional_ad_spend_analysis(df, save_path=None):
@@ -524,7 +526,8 @@ def plot_regional_ad_spend_analysis(df, save_path=None):
     if save_path:
         plt.savefig(save_path)
     plt.show()
-
+    time.sleep(3)  # Add a 3-second delay. this helped to prevent getting rate limited
+    plt.close()
 
 def generate_ad_spend_visualizations(df):
     """Generate comprehensive visualizations for ad spend analysis."""
@@ -679,6 +682,176 @@ def generate_ad_spend_visualizations(df):
     print("Ad spend visualizations completed.")
 
 
+def plot_database_performance_comparison(df, db_column='db_cohort'):
+    """
+    Create a detailed visualization of CES performance across database categories.
+
+    Parameters:
+    df (pandas.DataFrame): DataFrame containing CES and database information
+    db_column (str): Column name containing database cohort information
+    """
+    print("Starting database performance comparison...")
+    plt.close('all')  # Close any existing plots
+    time.sleep(1)  # Initial delay
+
+    # Calculate statistics from the data
+    db_stats = (df.groupby(db_column)['CES_Response_Value']
+                .agg(['mean', 'count', 'std'])
+                .round(3))
+
+    # Perform statistical tests
+    from scipy import stats as scipy_stats  # Renamed to avoid conflict
+    # ANOVA test
+    categories = df[db_column].unique()
+    groups = [df[df[db_column] == cat]['CES_Response_Value'] for cat in categories]
+    f_stat, anova_p = scipy_stats.f_oneway(*groups)
+
+    # Pairwise t-tests between refactored groups
+    refactored_current = df[df[db_column] == 'refactored_current']['CES_Response_Value']
+    refactored_legacy = df[df[db_column] == 'refactored_legacy']['CES_Response_Value']
+    t_stat, p_value = scipy_stats.ttest_ind(refactored_current, refactored_legacy)
+
+    # Create significance dictionary
+    significance = {
+        cat: p_value < 0.05 if cat in ['refactored_current', 'refactored_legacy'] else False
+        for cat in categories
+    }
+
+    # Create the plot
+    plt.figure(figsize=(12, 8))
+    ax = plt.gca()
+
+    # Create bars
+    bars = plt.bar(range(len(db_stats)), db_stats['mean'], width=0.6)
+
+    # Color the bars based on significance
+    for i, bar in enumerate(bars):
+        category = db_stats.index[i]
+        bar.set_color('#3B82F6' if significance[category] else '#93C5FD')
+
+        # Add mean value label
+        plt.text(i, db_stats.loc[db_stats.index[i], 'mean'],
+                 f"{db_stats.loc[db_stats.index[i], 'mean']:.2f}",
+                 ha='center', va='bottom',
+                 fontweight='bold')
+
+        # Add sample size
+        plt.text(i, 0.5, f"n={int(db_stats.loc[db_stats.index[i], 'count'])}",
+                 ha='center', va='bottom',
+                 color='darkblue',
+                 fontweight='bold')
+
+        # Add significance indicator
+        if significance[category]:
+            plt.text(i, 0.2, '★ Significant',
+                     ha='center', va='bottom',
+                     color='#2563EB',
+                     fontweight='bold')
+
+    # Customize the plot
+    plt.title('Database Performance Comparison',
+              pad=20, fontsize=14, fontweight='bold')
+
+    plt.xticks(range(len(db_stats)), db_stats.index,
+               rotation=45, ha='right')
+
+    set_ces_y_axis(ax)
+    plt.ylabel('Mean CES Score')
+
+    # Add statistical annotations
+    stat_text = (f"ANOVA: F={f_stat:.2f}, p={anova_p:.4f}\n"
+                 f"Refactored Comparison: p={p_value:.4f}")
+
+    plt.text(0.5, -0.2, stat_text,
+             ha='center', va='center',
+             transform=ax.transAxes,
+             fontsize=10,
+             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+
+    plt.tight_layout()
+    plt.show()
+    time.sleep(3)  # Add a 3-second delay. this helped to prevent getting rate limited
+    plt.close()
+
+def plot_detailed_db_analysis(df, db_column='db_cohort',
+                              time_column='Response_Group',
+                              ces_column='CES_Response_Value'):
+    """
+    Create a multi-panel analysis of database performance.
+
+    Parameters:
+    df (pandas.DataFrame): DataFrame containing CES and database information
+    db_column (str): Column name containing database cohort information
+    time_column (str): Column name containing time/group information
+    ces_column (str): Column name containing CES scores
+    """
+    print("Starting detailed db analysis...")  # Add debug print
+
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+
+    # 1. Main comparison (top left)
+    sns.boxplot(data=df, x=db_column, y=ces_column, ax=ax1)
+    ax1.set_title('CES Distribution by Database Category')
+    ax1.set_xticklabels(ax1.get_xticklabels(), rotation=45, ha='right')
+    set_ces_y_axis(ax1)
+
+    # 2. Trend over time (top right)
+    sns.lineplot(data=df, x=time_column, y=ces_column,
+                 hue=db_column, ax=ax2, marker='o')
+    ax2.set_title('CES Trends by Database Category')
+    set_ces_y_axis(ax2)
+
+    # 3. Response distribution (bottom left)
+    sns.kdeplot(data=df, x=ces_column, hue=db_column, ax=ax3)
+    ax3.set_title('CES Score Distribution by Database Category')
+
+    # 4. Statistical summary (bottom right)
+    ax4.clear()
+    ax4.axis('off')
+
+    # Calculate statistics
+    stats_df = df.groupby(db_column)[ces_column].agg(['count', 'mean', 'std']).round(3)
+
+    # Perform ANOVA
+    categories = df[db_column].unique()
+    groups = [df[df[db_column] == cat][ces_column] for cat in categories]
+    f_stat, anova_p = scipy_stats.f_oneway(*groups)  # Changed to scipy_stats
+
+    # Calculate pairwise t-tests
+    ref_current = df[df[db_column] == 'refactored_current'][ces_column]
+    ref_legacy = df[df[db_column] == 'refactored_legacy'][ces_column]
+    t_stat, p_value = scipy_stats.ttest_ind(ref_current, ref_legacy)  # Changed to scipy_stats
+
+    stats_text = f"""
+    Statistical Summary:
+
+    Sample Sizes:
+    {stats_df['count'].to_string()}
+
+    Mean Scores:
+    {stats_df['mean'].to_string()}
+
+    Standard Deviations:
+    {stats_df['std'].to_string()}
+
+    ANOVA Results:
+    • F-statistic: {f_stat:.2f}
+    • p-value: {anova_p:.4f} {'**' if anova_p < 0.01 else '*' if anova_p < 0.05 else ''}
+
+    Refactored Current vs Legacy:
+    • Difference: {ref_current.mean() - ref_legacy.mean():.4f}
+    • p-value: {p_value:.4f} {'**' if p_value < 0.01 else '*' if p_value < 0.05 else ''}
+    """
+
+    ax4.text(0.1, 0.9, stats_text, fontsize=10,
+             verticalalignment='top',
+             fontfamily='monospace')
+
+    plt.tight_layout()
+    plt.show()
+    time.sleep(3)  # Add a 3-second delay. this helped to prevent getting rate limited
+    plt.close()
+
 def plot_ad_spend_comparison(df):
     """Compare CES scores between clients with and without ad spend."""
     # Create comparison groups
@@ -811,92 +984,129 @@ def plot_ad_spend_analysis(df):
     plt.tight_layout()
     plt.show()
 
-# Updated `generate_all_visualizations` function
-def generate_all_visualizations(df, model, config, combinatorial_results):
+def generate_all_visualization_calls(df, model, config, combinatorial_results):
     print("Generating visualizations...")
 
-    # 0. CES Scores by Cohort
-    plot_ces_scores_by_response_group(df)
-    plot_boxplot_by_category(df, 'Response_Group', 'CES_Response_Value')
+    viz_functions = [
+        plot_ces_scores_by_response_group,
+        lambda df: plot_boxplot_by_category(df, 'Response_Group', 'CES_Response_Value'),
+        lambda df: plot_ces_distribution_by_group(df, 'Response_Group', 'CES_Response'),
+        lambda df: plot_boxplot_by_category(df, 'ClientUser_Type', 'CES_Response_Value'),
+        lambda df: plot_boxplot_by_category(df, 'Has_Partner', 'CES_Response_Value'),
+        lambda df: plot_ces_distribution(df, 'CES_Response_Value'),
+        lambda df: plot_feature_importances(model, df[config['modeling']['feature_columns']]),
+        lambda df: plot_correlation_with_ces(df, 'CES_Response_Value'),
+        lambda df: plot_mean_ces_by_db(df, 'db_number', 'CES_Response_Value'),
+        lambda df: plot_boxplot_by_category(df, 'ClientUser_Type', 'CES_Response_Value'),
+        lambda df: visualize_combinatorial_results(combinatorial_results),
+        plot_combined_ces_distribution,
+        lambda df: plot_ces_by_variable_and_response_group(df, 'ClientUser_Type'),
+        plot_filtered_ces_distribution,
+        plot_ad_spend_analysis,
+        lambda df: generate_ad_spend_visualizations(df),
+        plot_detailed_db_analysis,
+        plot_database_performance_comparison
+    ]
 
-    # 1. CES scores by decile across metrics (e.g., account age, leads per seat)
-    #plot_ces_by_ntile(df, 'account_age',10)
-    #plot_ces_by_ntile(df, 'leads_per_seat',4)
-    #plot_ces_by_ntile(df, 'account_age',10)
-    #plot_ces_by_ntile(df, 'leads_per_seat',4)
-
-    # 2. Percent distribution across CES responses by cohort
-    plot_ces_distribution_by_group(df, 'Response_Group', response_column='CES_Response')
-
-    # 3. CES trend over time
-    #plot_ces_trend_over_time(df, 'Response_Timestamp', 'CES_Response_Value')
-
-    # 4. CES by category (e.g., user type, partner status)
-    plot_boxplot_by_category(df, 'ClientUser_Type', 'CES_Response_Value')
-    plot_boxplot_by_category(df, 'Has_Partner', 'CES_Response_Value')
-
-    # 5. Distribution of CES responses
-    plot_ces_distribution(df, 'CES_Response_Value')
-
-    # 6. CES by time of day
-    #plot_ces_by_time_of_day(df, 'Response_Timestamp', 'CES_Response_Value')
-
-    # 7. CES by day of the week
-    #plot_ces_by_day_of_week(df, 'Response_Timestamp', 'CES_Response_Value')
-
-    # 8. Feature importances in the random forest model + SHAP summary plot
-    plot_feature_importances(model, df[config['modeling']['feature_columns']])
-
-    # 9. Correlation of numerical features with CES
-    plot_correlation_with_ces(df, target_column='CES_Response_Value')
-
-    # 10. Mean CES and response count by DB number
-    plot_mean_ces_by_db(df, 'db_number', 'CES_Response_Value')
-
-    # 11. Boxplot by DB and user type
-    #plot_boxplot_by_category(df, 'db_number', 'CES_Response_Value')
-    plot_boxplot_by_category(df, 'ClientUser_Type', 'CES_Response_Value')
-
-    # 12. Elasticity analysis of cohorts
-    #plot_elasticity_by_cohort(df, 'Response_Group', 'CES_Response_Value')
-
-    # 13. Combinatorial analysis of cohorts
-    visualize_combinatorial_results(combinatorial_results)
-
-    # 14. Identify top stable and elastic groups across all combinations
-    most_stable, most_elastic = identify_top_stable_elastic_groups(combinatorial_results)
-
-    ## 14a. Print most stable groups
-    print("\nMost Stable Groups across all combinations:")
-    print(most_stable.to_string(index=False))
-
-    ## 14b. Print most elastic groups
-    print("\nMost Elastic Groups across all combinations:")
-    print(most_elastic.to_string(index=False))
-
-    #15 Radar chart
-    #categories = ['ClientUser_Type', 'Response_Group']
-    #plot_ces_radar_chart(df, categories)
-
-    #16 Distribution Curves of user type per response group
-    plot_combined_ces_distribution(df)
-    #analyze_ces_distributions(df)
-
-    #17 USer Type Line Chart
-    plot_ces_by_variable_and_response_group(df, 'ClientUser_Type')
-    #version with new variable and title for reference
-    #plot_ces_by_variable_and_response_group(df, 'SomeVariable', 'Custom Chart Title')
-
-    #18 PM Distrubtion
-    plot_filtered_ces_distribution(df, 'CES_Response_Value')
-
-    #19 ad spend visualization
-    print("Generating ad spend analysis visualizations...")
-    print("haven't done this yet")
-    plot_ad_spend_analysis(df)
-    generate_ad_spend_visualizations(df)
-
-    #00 Sankey
-    #plot_ces_sankey_diagram(df, 'ClientUser_Type', 'CES_Response')
+    for viz_func in viz_functions:
+        try:
+            viz_func(df)
+            time.sleep(5)
+            plt.close('all')
+        except Exception as e:
+            print(f"Error in visualization: {str(e)}")
+            continue
 
     print("All visualizations generated successfully.")
+
+# Updated `generate_all_visualizations` function
+# def generate_all_visualizations(df, model, config, combinatorial_results):
+#     print("Generating visualizations...")
+#
+#     # 0. CES Scores by Cohort
+#     plot_ces_scores_by_response_group(df)
+#     plot_boxplot_by_category(df, 'Response_Group', 'CES_Response_Value')
+#
+#     # 1. CES scores by decile across metrics (e.g., account age, leads per seat)
+#     #plot_ces_by_ntile(df, 'account_age',10)
+#     #plot_ces_by_ntile(df, 'leads_per_seat',4)
+#     #plot_ces_by_ntile(df, 'account_age',10)
+#     #plot_ces_by_ntile(df, 'leads_per_seat',4)
+#
+#     # 2. Percent distribution across CES responses by cohort
+#     plot_ces_distribution_by_group(df, 'Response_Group', response_column='CES_Response')
+#
+#     # 3. CES trend over time
+#     #plot_ces_trend_over_time(df, 'Response_Timestamp', 'CES_Response_Value')
+#
+#     # 4. CES by category (e.g., user type, partner status)
+#     plot_boxplot_by_category(df, 'ClientUser_Type', 'CES_Response_Value')
+#     plot_boxplot_by_category(df, 'Has_Partner', 'CES_Response_Value')
+#
+#     # 5. Distribution of CES responses
+#     plot_ces_distribution(df, 'CES_Response_Value')
+#
+#     # 6. CES by time of day
+#     #plot_ces_by_time_of_day(df, 'Response_Timestamp', 'CES_Response_Value')
+#
+#     # 7. CES by day of the week
+#     #plot_ces_by_day_of_week(df, 'Response_Timestamp', 'CES_Response_Value')
+#
+#     # 8. Feature importances in the random forest model + SHAP summary plot
+#     plot_feature_importances(model, df[config['modeling']['feature_columns']])
+#
+#     # 9. Correlation of numerical features with CES
+#     plot_correlation_with_ces(df, target_column='CES_Response_Value')
+#
+#     # 10. Mean CES and response count by DB number
+#     plot_mean_ces_by_db(df, 'db_number', 'CES_Response_Value')
+#
+#     # 11. Boxplot by DB and user type
+#     #plot_boxplot_by_category(df, 'db_number', 'CES_Response_Value')
+#     plot_boxplot_by_category(df, 'ClientUser_Type', 'CES_Response_Value')
+#
+#     # 12. Elasticity analysis of cohorts
+#     #plot_elasticity_by_cohort(df, 'Response_Group', 'CES_Response_Value')
+#
+#     # 13. Combinatorial analysis of cohorts
+#     visualize_combinatorial_results(combinatorial_results)
+#
+#     # 14. Identify top stable and elastic groups across all combinations
+#     most_stable, most_elastic = identify_top_stable_elastic_groups(combinatorial_results)
+#
+#     ## 14a. Print most stable groups
+#     print("\nMost Stable Groups across all combinations:")
+#     print(most_stable.to_string(index=False))
+#
+#     ## 14b. Print most elastic groups
+#     print("\nMost Elastic Groups across all combinations:")
+#     print(most_elastic.to_string(index=False))
+#
+#     #15 Radar chart
+#     #categories = ['ClientUser_Type', 'Response_Group']
+#     #plot_ces_radar_chart(df, categories)
+#
+#     #16 Distribution Curves of user type per response group
+#     plot_combined_ces_distribution(df)
+#     #analyze_ces_distributions(df)
+#
+#     #17 USer Type Line Chart
+#     plot_ces_by_variable_and_response_group(df, 'ClientUser_Type')
+#     #version with new variable and title for reference
+#     #plot_ces_by_variable_and_response_group(df, 'SomeVariable', 'Custom Chart Title')
+#
+#     #18 PM Distrubtion
+#     plot_filtered_ces_distribution(df, 'CES_Response_Value')
+#
+#     #19 ad spend visualization
+#     print("Generating ad spend analysis visualizations...")
+#     print("haven't done this yet")
+#     plot_ad_spend_analysis(df)
+#     generate_ad_spend_visualizations(df)
+#
+#     #20 database comparisons
+#     plot_database_performance_comparison(df)
+#     plot_detailed_db_analysis(df)
+#
+#     #00 Sankey
+#     #plot_ces_sankey_diagram(df, 'ClientUser_Type', 'CES_Response')
